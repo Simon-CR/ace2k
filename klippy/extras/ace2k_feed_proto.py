@@ -36,6 +36,7 @@ MODE_NAMES = {
     6: "assisting_back",
     7: "error",
     8: "following",
+    9: "spinning",
 }
 KIND_NAMES = {
     0: "done",
@@ -75,6 +76,7 @@ REFUSAL_NAMES = {
     7: "no_move",
     8: "following",  # a speed set on a following lane; the follow keeps its own speed
     9: "sensors_stale",  # the insert sensors are stale (the ADC scan stopped): no start
+    10: "filament_present",  # roller spin: filament is inserted at the bay entrance
 }
 ERROR_KIND_NAMES = frozenset(KIND_NAMES[k] for k in ERROR_KINDS)
 NOTICE_KIND_NAMES = frozenset(KIND_NAMES[k] for k in NOTICE_KINDS)

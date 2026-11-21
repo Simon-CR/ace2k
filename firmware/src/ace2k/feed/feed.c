@@ -7,6 +7,7 @@ static bool is_moving_mode(uint8_t mode)
     case ACE2K_FEED_ROLLING_BACK:
     case ACE2K_FEED_UNLOADING:
     case ACE2K_FEED_LOADING:
+    case ACE2K_FEED_SPINNING:
         return true;
     default:
         return false;
@@ -229,7 +230,8 @@ static bool move_done_ends_mode(struct ace2k_feed *self, uint8_t lane, uint32_t 
         enter_error(self, lane, ACE2K_FEED_UNLOAD_INCOMPLETE, now_ms);
         return true;
     }
-    if (l->mode == ACE2K_FEED_FEEDING || l->mode == ACE2K_FEED_ROLLING_BACK) {
+    if (l->mode == ACE2K_FEED_FEEDING || l->mode == ACE2K_FEED_ROLLING_BACK ||
+        l->mode == ACE2K_FEED_SPINNING) {
         ace2k_feed_notice(self, lane, ACE2K_FEED_DONE);
         go_idle(self, lane, now_ms);
         return true;
@@ -499,6 +501,11 @@ static void clear_step(struct ace2k_feed *self, uint8_t lane, const struct ace2k
 static bool fall_or_clear(struct ace2k_feed *self, uint8_t lane, bool fell,
                           const struct ace2k_feed_inputs *in, uint32_t now_ms)
 {
+    if (self->l[lane].mode == ACE2K_FEED_SPINNING && ace2k_feed_bit(in->insert, lane)) {
+        /* A reverse roller spin is only for un-inserted bays; stop at once on insertion. */
+        ace2k_feed_finish(self, lane, ACE2K_FEED_STOPPED, now_ms);
+        return true;
+    }
     if (on_insert_fall(self, lane, fell, now_ms)) {
         return true;
     }

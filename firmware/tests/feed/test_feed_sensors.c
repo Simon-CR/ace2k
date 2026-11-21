@@ -55,7 +55,7 @@ TEST(sensors_unknown_refuses_every_start_and_the_search)
     static const enum ace2k_feed_cmd cmds[] = {
         ACE2K_FEED_CMD_FEED,        ACE2K_FEED_CMD_ROLLBACK, ACE2K_FEED_CMD_ASSIST,
         ACE2K_FEED_CMD_ASSIST_BACK, ACE2K_FEED_CMD_UNLOAD,   ACE2K_FEED_CMD_LOAD,
-        ACE2K_FEED_CMD_ASSIST_BOTH,
+        ACE2K_FEED_CMD_ASSIST_BOTH, ACE2K_FEED_CMD_SPIN,
     };
     uint8_t seq = 31;
     for (unsigned i = 0; i < sizeof cmds / sizeof cmds[0]; i++) {

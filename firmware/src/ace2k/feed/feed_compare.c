@@ -84,7 +84,8 @@ static bool partial_trips(struct ace2k_feed *self, uint8_t lane, bool reverse)
 enum ace2k_feed_trip ace2k_feed_compare(struct ace2k_feed *self, uint8_t lane)
 {
     const struct ace2k_feed_lane *l = &self->l[lane];
-    if (!ace2k_feed_mode_runs(l->mode) || !ace2k_lane_is_moving(self->lane, lane)) {
+    if (l->mode == ACE2K_FEED_SPINNING || !ace2k_feed_mode_runs(l->mode) ||
+        !ace2k_lane_is_moving(self->lane, lane)) {
         return ACE2K_FEED_TRIP_NONE;
     }
     if (l->mode == ACE2K_FEED_LOADING && in_load_grace(self, lane)) {

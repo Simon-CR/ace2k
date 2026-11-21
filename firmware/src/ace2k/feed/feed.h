@@ -14,6 +14,8 @@
 #define ACE2K_FEED_EVENT_RING 16U
 /* the unload budget when the command gives none */
 #define ACE2K_FEED_UNLOAD_MAX_UM ACE2K_LANE_MOVE_MAX_UM
+/* Maximum motor tach travel for a reverse-only roller spin on an empty-inlet bay. */
+#define ACE2K_FEED_SPIN_MAX_UM 200000U
 /* the window of motor travel of the partial trigger; initial value */
 #define ACE2K_FEED_SLIP_CHECK_UM 50000U
 /* The filament short by more than this in a window is a slip.  Initial value.  It must stay under
@@ -272,6 +274,8 @@ enum ace2k_feed_mode {
     /* The follow: forward bursts on taut, and take-ups on this lane's full, each one ended at rest.
      * Once the insert has fallen, its tail. */
     ACE2K_FEED_FOLLOWING = 8,
+    /* Reverse-only motor-tach roller spin on an empty-inlet bay (drying rotisserie). */
+    ACE2K_FEED_SPINNING = 9,
 };
 
 /* The mode argument of ace2k_feed_start on the wire. */
@@ -283,6 +287,7 @@ enum ace2k_feed_cmd {
     ACE2K_FEED_CMD_UNLOAD = 4,
     ACE2K_FEED_CMD_LOAD = 5,
     ACE2K_FEED_CMD_ASSIST_BOTH = 6, /* the follow */
+    ACE2K_FEED_CMD_SPIN = 7,        /* reverse-only roller spin without inserted filament */
 };
 
 enum ace2k_feed_kind {
@@ -373,6 +378,8 @@ enum ace2k_feed_refusal {
     ACE2K_FEED_REFUSED_FOLLOWING = 8,
     /* every start and the search: the insert sensors are unknown (the ADC scan stopped) */
     ACE2K_FEED_REFUSED_SENSORS_STALE = 9,
+    /* roller spin: refused while filament is present at the bay entrance */
+    ACE2K_FEED_REFUSED_FILAMENT_PRESENT = 10,
 };
 
 enum ace2k_feed_sub {

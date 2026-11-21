@@ -23,7 +23,7 @@ static enum ace2k_feed_refusal map_move_rc(int rc)
  * out (measured on the unit). */
 static bool needs_strand(enum ace2k_feed_cmd cmd)
 {
-    return cmd != ACE2K_FEED_CMD_ROLLBACK;
+    return (bool)(cmd != ACE2K_FEED_CMD_ROLLBACK && cmd != ACE2K_FEED_CMD_SPIN);
 }
 
 /* The refusals that come before every command, in this order.  The tag search's start takes them
@@ -58,6 +58,9 @@ enum ace2k_feed_refusal ace2k_feed_start_refusal(const struct ace2k_feed *self, 
     if (needs_strand(cmd) && !ace2k_feed_bit(self->last.insert, lane)) {
         return ACE2K_FEED_REFUSED_NO_FILAMENT;
     }
+    if (cmd == ACE2K_FEED_CMD_SPIN && ace2k_feed_bit(self->last.insert, lane)) {
+        return ACE2K_FEED_REFUSED_FILAMENT_PRESENT;
+    }
     return ACE2K_FEED_ACCEPTED;
 }
 
@@ -71,7 +74,7 @@ static bool stop_fits(enum ace2k_feed_cmd cmd, struct ace2k_feed_stop_on stop)
     if (stop.held && cmd != ACE2K_FEED_CMD_ROLLBACK && cmd != ACE2K_FEED_CMD_UNLOAD) {
         return false;
     }
-    if (stop.at_rest && cmd == ACE2K_FEED_CMD_ASSIST_BOTH) {
+    if (stop.at_rest && (cmd == ACE2K_FEED_CMD_ASSIST_BOTH || cmd == ACE2K_FEED_CMD_SPIN)) {
         return false;
     }
     return true;
@@ -125,6 +128,23 @@ static enum ace2k_feed_refusal start_move(struct ace2k_feed *self, uint8_t lane,
         self->l[lane].speed_um_s = speed_um_s;
         self->l[lane].length_um = length_um;
         self->l[lane].free_tip = free_tip;
+    }
+    return verdict;
+}
+
+/* Reverse-only motor-tach roller spin without inserted filament (for drying rotisserie). */
+static enum ace2k_feed_refusal start_spin(struct ace2k_feed *self, uint8_t lane, uint32_t length_um,
+                                          uint32_t speed_um_s, uint8_t seq, uint32_t now_ms)
+{
+    if (length_um == 0U || length_um > ACE2K_FEED_SPIN_MAX_UM) {
+        return ACE2K_FEED_REFUSED_BOUNDS;
+    }
+    enum ace2k_feed_refusal verdict = map_move_rc(
+        ace2k_lane_move_motor(self->lane, lane, ACE2K_LANE_REVERSE, length_um, speed_um_s, now_ms));
+    if (verdict == ACE2K_FEED_ACCEPTED) {
+        ace2k_feed_enter(self, lane, ACE2K_FEED_SPINNING, seq, now_ms);
+        self->l[lane].speed_um_s = speed_um_s;
+        self->l[lane].length_um = length_um;
     }
     return verdict;
 }
@@ -186,6 +206,9 @@ enum ace2k_feed_refusal ace2k_feed_start_tip(struct ace2k_feed *self, uint8_t la
         break;
     case ACE2K_FEED_CMD_LOAD:
         verdict = ace2k_feed_load_start(self, lane, length_um, speed_um_s, seq, now_ms);
+        break;
+    case ACE2K_FEED_CMD_SPIN:
+        verdict = start_spin(self, lane, length_um, speed_um_s, seq, now_ms);
         break;
     default:
         verdict = ACE2K_FEED_REFUSED_BOUNDS;

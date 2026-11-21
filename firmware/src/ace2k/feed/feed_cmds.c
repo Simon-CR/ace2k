@@ -125,6 +125,8 @@ DECL_CONSTANT("ACE2K_FEED_REFUSED_FOLLOWING", ACE2K_FEED_REFUSED_FOLLOWING);
 DECL_CONSTANT("ACE2K_FEED_GRIP_UM", ACE2K_FEED_GRIP_UM);
 DECL_CONSTANT("ACE2K_FEED_GRIP_UM_MIN", ACE2K_FEED_GRIP_UM_MIN);
 DECL_CONSTANT("ACE2K_FEED_GRIP_UM_MAX", ACE2K_FEED_GRIP_UM_MAX);
+// Reverse-only roller spin limit for empty-inlet spool rotisserie.
+DECL_CONSTANT("ACE2K_FEED_SPIN_MAX_UM", ACE2K_FEED_SPIN_MAX_UM);
 // NOLINTEND(bugprone-signed-bitwise)
 
 static struct ace2k_feed ace2k_feed_instance;
@@ -351,7 +353,7 @@ void ace2k_feed_cmd_start(uint32_t *args)
     ensure_ready();
     uint8_t lane =
         ACE2K_ARG_LANE(args[ACE2K_FEED_START_ARG_LANE], "ace2k_feed_start: lane out of range");
-    uint8_t mode = ACE2K_ARG_U8_MAX(args[ACE2K_FEED_START_ARG_MODE], ACE2K_FEED_CMD_ASSIST_BOTH,
+    uint8_t mode = ACE2K_ARG_U8_MAX(args[ACE2K_FEED_START_ARG_MODE], ACE2K_FEED_CMD_SPIN,
                                     "ace2k_feed_start: mode out of range");
     // The host chooses the seq.  Any value 0..255 is accepted, and the events of the mode echo it.
     // The host never sends 0, which marks a motion that the firmware started on its own.  A seq
