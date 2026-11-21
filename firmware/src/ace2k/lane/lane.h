@@ -123,11 +123,13 @@ struct ace2k_lane_move {
      * floor setpoint is written on the tick where the landing begins. */
     bool landing;
     bool no_landing; /* started by ace2k_lane_move_unlanded(): never lands */
+    bool on_motor;   /* position stop closes on motor tach travel, not encoder counts */
     bool measured;   /* a speed loop has measured the motor: the P term has an error to act on */
-    uint32_t speed_um_s;    /* the setpoint */
-    uint32_t target_counts; /* encoder counts to travel along the command */
-    uint32_t fg_start;      /* the raw tach at the start, for motor_um and the speed loop */
-    int32_t enc_start;      /* the encoder count at the start, for the position stop */
+    uint32_t speed_um_s;      /* the setpoint */
+    uint32_t target_counts;   /* encoder counts to travel along the command */
+    uint32_t target_motor_um; /* motor tach travel target when on_motor is set */
+    uint32_t fg_start;        /* the raw tach at the start, for motor_um and the speed loop */
+    int32_t enc_start;        /* the encoder count at the start, for the position stop */
     uint32_t t_start_ms;
     uint32_t deadline_ms;
     uint32_t fg_seen; /* the raw tach when it last changed */
@@ -275,6 +277,13 @@ int ace2k_lane_move(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir d
  * keep up with the retraction that it takes back.  The caller masks interrupts. */
 int ace2k_lane_move_unlanded(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir dir,
                              uint32_t length_um, uint32_t speed_um_s, uint32_t now_ms);
+
+/* Starts a bounded move whose position stop closes on the motor tach (fg_to_um) rather than the
+ * filament encoder, with landing.  motor_um is in 1..ACE2K_LANE_MOVE_MAX_UM, and bounds match
+ * ace2k_lane_move().  Used when driving empty-inlet rollers where no filament passes the encoder.
+ * The caller masks interrupts. */
+int ace2k_lane_move_motor(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir dir,
+                          uint32_t motor_um, uint32_t speed_um_s, uint32_t now_ms);
 
 /* Stops the lane on the spot, with run low and PWM at stop, whatever its state.  A move that was
  * active leaves an ACE2K_LANE_STOPPED result.  ACE2K_LANE_ALL stops every lane.  The caller masks

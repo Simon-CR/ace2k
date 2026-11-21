@@ -111,10 +111,20 @@ static uint32_t counts_span_um(uint32_t counts, uint32_t um_per_count_x10)
     return um > UINT32_MAX ? UINT32_MAX : (uint32_t)um;
 }
 
-/* The travel left in micrometres at the lane's scale, saturated.  The landing and the deadline of a
- * speed change are decided on it. */
+/* The motor tach travel still to go when on_motor is set. */
+static uint32_t left_motor_um(const struct ace2k_lane_counters *l)
+{
+    uint32_t done = ace2k_lane_fg_to_um(l->fg_raw - l->move.fg_start);
+    return done >= l->move.target_motor_um ? 0U : (l->move.target_motor_um - done);
+}
+
+/* The travel left in micrometres (motor tach when on_motor, else encoder at the lane's scale).
+ * The landing and the deadline of a speed change are decided on it. */
 static uint32_t left_um(const struct ace2k_lane_counters *l)
 {
+    if (l->move.on_motor) {
+        return left_motor_um(l);
+    }
     return counts_span_um(left_counts(l), l->um_per_count_x10);
 }
 
@@ -278,10 +288,9 @@ static void run_move(struct ace2k_lane *self, uint8_t lane, uint32_t now_ms, boo
         end_move(self, lane, ACE2K_LANE_STALLED, now_ms);
         return;
     }
-    /* The position stop closes on the filament.  The motor's travel is the result's odometer, not
-     * the target.  Under a spool the drive gear slips a few per cent, and the host asked for
-     * filament. */
-    if (left_counts(l) == 0) {
+    /* The position stop closes on the filament, or on the motor tach when on_motor is set. */
+    bool reached = (bool)(m->on_motor ? (left_motor_um(l) == 0U) : (left_counts(l) == 0U));
+    if (reached) {
         end_move(self, lane, ACE2K_LANE_DONE, now_ms);
         return;
     }
@@ -482,10 +491,8 @@ static void begin_move(struct ace2k_lane *self, uint8_t lane, uint32_t now_ms)
     m->active = true;
 }
 
-/* The start shared by ace2k_lane_move() and ace2k_lane_move_unlanded().  lands says whether the
- * move has a landing at all. */
-static int start_move(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir dir,
-                      uint32_t length_um, uint32_t speed_um_s, uint32_t now_ms, bool lands)
+static int init_move_common(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir dir,
+                            uint32_t length_um, uint32_t speed_um_s, uint32_t now_ms)
 {
     if (lane >= ACE2K_LANE_COUNT || length_um == 0 || length_um > ACE2K_LANE_MOVE_MAX_UM ||
         !ace2k_lane_speed_in_bounds(speed_um_s)) {
@@ -498,11 +505,24 @@ static int start_move(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir
     *m = (struct ace2k_lane_move){ .active = false };
     m->reverse = (dir == ACE2K_LANE_REVERSE);
     m->speed_um_s = speed_um_s;
+    m->deadline_ms = deadline_for(length_um, speed_um_s, now_ms);
+    return 0;
+}
+
+/* The start shared by ace2k_lane_move() and ace2k_lane_move_unlanded().  lands says whether the
+ * move has a landing at all. */
+static int start_move(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir dir,
+                      uint32_t length_um, uint32_t speed_um_s, uint32_t now_ms, bool lands)
+{
+    int rc = init_move_common(self, lane, dir, length_um, speed_um_s, now_ms);
+    if (rc != 0) {
+        return rc;
+    }
+    struct ace2k_lane_move *m = &self->lane[lane].move;
     m->target_counts = um_to_counts(length_um, self->lane[lane].um_per_count_x10);
     if (m->target_counts == 0) {
         m->target_counts = 1; /* a length under one count still ends on a count */
     }
-    m->deadline_ms = deadline_for(length_um, speed_um_s, now_ms);
     m->no_landing = (bool)!lands;
     /* Decided as the tick decides it, on the target in counts.  A move no longer than the landing
      * runs at the floor from its start. */
@@ -522,6 +542,21 @@ int ace2k_lane_move_unlanded(struct ace2k_lane *self, uint8_t lane, enum ace2k_l
                              uint32_t length_um, uint32_t speed_um_s, uint32_t now_ms)
 {
     return start_move(self, lane, dir, length_um, speed_um_s, now_ms, false);
+}
+
+int ace2k_lane_move_motor(struct ace2k_lane *self, uint8_t lane, enum ace2k_lane_dir dir,
+                          uint32_t motor_um, uint32_t speed_um_s, uint32_t now_ms)
+{
+    int rc = init_move_common(self, lane, dir, motor_um, speed_um_s, now_ms);
+    if (rc != 0) {
+        return rc;
+    }
+    struct ace2k_lane_move *m = &self->lane[lane].move;
+    m->on_motor = true;
+    m->target_motor_um = motor_um;
+    m->landing = in_landing(motor_um);
+    begin_move(self, lane, now_ms);
+    return 0;
 }
 
 static void stop_one(struct ace2k_lane *self, uint8_t lane, uint32_t now_ms)

@@ -119,6 +119,7 @@ enum ace2k_led_lane_pattern ace2k_feed_led_pattern(uint8_t mode, bool insert)
     case ACE2K_FEED_ROLLING_BACK:
     case ACE2K_FEED_UNLOADING:
     case ACE2K_FEED_LOADING:
+    case ACE2K_FEED_SPINNING:
         return ACE2K_LED_LANE_MOVING;
     case ACE2K_FEED_IDLE:
     default:

@@ -8980,12 +8980,97 @@ TEST(each_mode_maps_to_its_led_pattern)
         { ACE2K_FEED_ASSISTING_BACK, ACE2K_LED_LANE_LOADED, ACE2K_LED_LANE_LOADED },
         { ACE2K_FEED_ERROR, ACE2K_LED_LANE_ERROR, ACE2K_LED_LANE_ERROR },
         { ACE2K_FEED_FOLLOWING, ACE2K_LED_LANE_LOADED, ACE2K_LED_LANE_LOADED },
+        { ACE2K_FEED_SPINNING, ACE2K_LED_LANE_MOVING, ACE2K_LED_LANE_MOVING },
         { 200U, ACE2K_LED_LANE_OFF, ACE2K_LED_LANE_LOADED }, /* unknown: read as idle */
     };
     for (size_t i = 0; i < ACE2K_ARRAY_SIZE(cases); i++) {
         ASSERT_EQ(ace2k_feed_led_pattern(cases[i].mode, false), cases[i].without);
         ASSERT_EQ(ace2k_feed_led_pattern(cases[i].mode, true), cases[i].with);
     }
+}
+
+TEST(roller_spin_runs_reverse_on_empty_lane_and_stops_immediately_if_inserted)
+{
+    struct world w;
+    world_init(&w);
+    struct ace2k_feed_event e;
+    /* Refused while filament is present at the bay entrance. */
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 40000, 15000, 81, w.now),
+              ACE2K_FEED_REFUSED_FILAMENT_PRESENT);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_IDLE);
+    /* Empty lane accepts bounded spin; length/speed bounds and stop_when at_rest are enforced. */
+    w.in.insert = 0x00;
+    step(&w, 0, 0);
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 0, 15000, 82, w.now),
+              ACE2K_FEED_REFUSED_BOUNDS);
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, ACE2K_FEED_SPIN_MAX_UM + 1U, 15000,
+                               83, w.now),
+              ACE2K_FEED_REFUSED_BOUNDS);
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 40000, 1000, 84, w.now),
+              ACE2K_FEED_REFUSED_BOUNDS);
+    ASSERT_EQ(ace2k_feed_stop_when(&w.feed, 0, false, true, 0), 0);
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 40000, 15000, 85, w.now),
+              ACE2K_FEED_REFUSED_BOUNDS);
+    /* Reverse spin past stall_check_um (35 mm > 20 mm) with stationary encoder completes done. */
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 40000, 15000, 86, w.now),
+              ACE2K_FEED_ACCEPTED);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_SPINNING);
+    ASSERT_TRUE(w.run[0] && w.reverse[0]);
+    ASSERT_EQ(ace2k_feed_set_speed(&w.feed, 0, 20000, w.now), ACE2K_FEED_ACCEPTED);
+    steps(&w, 10, 40, 0);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_SPINNING);
+    steps(&w, 5, 20, 0);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_IDLE);
+    ASSERT_TRUE(!w.run[0]);
+    ASSERT_TRUE(pop(&w, &e));
+    ASSERT_EQ(e.kind, ACE2K_FEED_DONE);
+    ASSERT_EQ(e.mode, ACE2K_FEED_SPINNING);
+    ASSERT_EQ(e.seq, 86);
+    ASSERT_EQ(e.filament_um, 0);
+    ASSERT_TRUE(e.motor_um >= 40000U);
+    ASSERT_TRUE(!pop(&w, &e));
+    /* Inserting filament mid-spin stops immediately without starting an auto-load on that tick. */
+    w.feed.load.auto_load = true;
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 100000, 15000, 87, w.now),
+              ACE2K_FEED_ACCEPTED);
+    steps(&w, 3, 2, 0);
+    w.in.insert = 0x01;
+    step(&w, 2, 0);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_IDLE);
+    ASSERT_TRUE(!w.run[0]);
+    ASSERT_TRUE(pop(&w, &e));
+    ASSERT_EQ(e.kind, ACE2K_FEED_STOPPED);
+    ASSERT_EQ(e.mode, ACE2K_FEED_SPINNING);
+    ASSERT_EQ(e.seq, 87);
+    ASSERT_TRUE(!pop(&w, &e));
+    /* Motor stall during spin enters error. */
+    w.in.insert = 0x00;
+    step(&w, 0, 0);
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 40000, 15000, 88, w.now),
+              ACE2K_FEED_ACCEPTED);
+    steps(&w, 101, 0, 0);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_ERROR);
+    ASSERT_EQ(ace2k_feed_error(&w.feed, 0), ACE2K_FEED_MOTOR_STALLED);
+    ASSERT_TRUE(pop(&w, &e));
+    ASSERT_EQ(e.kind, ACE2K_FEED_MOTOR_STALLED);
+    /* Link loss and stale sensors stop a running spin safely. */
+    ASSERT_TRUE(ace2k_feed_clear(&w.feed, 0));
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 40000, 15000, 89, w.now),
+              ACE2K_FEED_ACCEPTED);
+    w.in.link_ok = false;
+    step(&w, 0, 0);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_IDLE);
+    ASSERT_TRUE(pop(&w, &e));
+    ASSERT_EQ(e.kind, ACE2K_FEED_STOPPED_LINK);
+    w.in.link_ok = true;
+    step(&w, 0, 0);
+    ASSERT_EQ(ace2k_feed_start(&w.feed, 0, ACE2K_FEED_CMD_SPIN, 40000, 15000, 90, w.now),
+              ACE2K_FEED_ACCEPTED);
+    w.in.insert_unknown = true;
+    step(&w, 0, 0);
+    ASSERT_EQ(ace2k_feed_mode(&w.feed, 0), ACE2K_FEED_IDLE);
+    ASSERT_TRUE(pop(&w, &e));
+    ASSERT_EQ(e.kind, ACE2K_FEED_STOPPED_SENSORS);
 }
 
 // NOLINTNEXTLINE(readability-identifier-naming)

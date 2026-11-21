@@ -1358,6 +1358,43 @@ TEST(motor_travel_counts_across_the_tach_wrap_and_wraps_its_micrometres)
     ASSERT_EQ(ace2k_lane_motor_fwd_um(&l, 0), 100000);
 }
 
+TEST(motor_move_closes_on_tach_with_encoder_stationary_and_checks_bounds)
+{
+    struct ace2k_lane l;
+    struct ace2k_fake_counters f;
+    primed(&l, &f);
+    uint32_t now = 10;
+    struct ace2k_lane_result r;
+    ASSERT_EQ(ace2k_lane_move_motor(&l, 4, ACE2K_LANE_REVERSE, 35000, 15000, now), -ACE2K_EINVAL);
+    ASSERT_EQ(ace2k_lane_move_motor(&l, 0, ACE2K_LANE_REVERSE, 0, 15000, now), -ACE2K_EINVAL);
+    ASSERT_EQ(
+        ace2k_lane_move_motor(&l, 0, ACE2K_LANE_REVERSE, ACE2K_LANE_MOVE_MAX_UM + 1U, 15000, now),
+        -ACE2K_EINVAL);
+    ASSERT_EQ(ace2k_lane_move_motor(&l, 0, ACE2K_LANE_REVERSE, 35000, 1000, now), -ACE2K_EINVAL);
+    ASSERT_EQ(ace2k_lane_move_motor(&l, 0, ACE2K_LANE_REVERSE, 40000, 15000, now), 0);
+    ASSERT_TRUE(f.run[0] && f.reverse[0]);
+    ASSERT_EQ(ace2k_lane_move_motor(&l, 0, ACE2K_LANE_REVERSE, 40000, 15000, now), -ACE2K_EREFUSED);
+    ASSERT_EQ(ace2k_lane_set_speed(&l, 0, 20000, now), 0);
+    /* Run FG pulses in reverse with encoder counts remaining 0; ~495 pulses >= 40 000 um. */
+    run_ticks(&l, &f, &now, 10, 40, 0);
+    ASSERT_TRUE(ace2k_lane_is_moving(&l, 0));
+    run_ticks(&l, &f, &now, 5, 20, 0);
+    ASSERT_TRUE(!ace2k_lane_is_moving(&l, 0));
+    ASSERT_TRUE(!f.run[0]);
+    ASSERT_TRUE(ace2k_lane_pop_result(&l, 0, &r));
+    ASSERT_EQ(r.outcome, ACE2K_LANE_DONE);
+    ASSERT_EQ(r.filament_um, 0);
+    ASSERT_TRUE(r.motor_um >= 40000U);
+    ASSERT_EQ(ace2k_lane_motor_fwd_um(&l, 0), 0U);
+    ASSERT_EQ(ace2k_lane_motor_back_um(&l, 0), r.motor_um);
+    /* Stall stops a motor move identically when tach stays silent. */
+    ASSERT_EQ(ace2k_lane_move_motor(&l, 0, ACE2K_LANE_REVERSE, 40000, 15000, now), 0);
+    run_ticks(&l, &f, &now, 100, 0, 0);
+    ASSERT_TRUE(!ace2k_lane_is_moving(&l, 0));
+    ASSERT_TRUE(ace2k_lane_pop_result(&l, 0, &r));
+    ASSERT_EQ(r.outcome, ACE2K_LANE_STALLED);
+}
+
 // NOLINTNEXTLINE(readability-identifier-naming)
 int main(int argc, char **argv)
 {
