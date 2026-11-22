@@ -134,6 +134,7 @@ CMD_MODES = {
     "unload": 4,
     "load": 5,
     "assist_both": 6,
+    "spin": 7,
 }
 # A stop armed on the plunger (start_move's stop_when): none, by default.
 NO_STOP_KINDS: frozenset[str] = frozenset()
@@ -150,6 +151,12 @@ HELD_MODES = frozenset({"rollback", "unload"})
 HELD_FLOOR_SHARE = 0.95
 # The follow keeps the plunger at rest, so at_rest would end it on its second tick.
 AT_REST_REFUSED = "the follow keeps the plunger at rest, so at_rest would end it at once"
+# Roller spin runs with nothing in the insert sensor, so at_rest would end it at once.
+SPIN_AT_REST_REFUSED = "roller spin runs without inserted filament, so at_rest would end it at once"
+AT_REST_REFUSED_BY_MODE = {
+    "assist_both": AT_REST_REFUSED,
+    "spin": SPIN_AT_REST_REFUSED,
+}
 # The texts for a refused speed change. The unit answers in_error, no_move, following or bounds.
 SPEED_REFUSAL_TEXT = {
     "no_move": "no move running",
@@ -158,6 +165,8 @@ SPEED_REFUSAL_TEXT = {
     "bounds": "the speed is out of bounds",
 }
 NO_FOLLOW = "the unit's firmware has no follow tail (or no follow); flash v0.11.0"
+# Reverse roller spin without inserted filament (dryers); gated on ACE2K_FEED_SPIN_MAX_UM.
+NO_SPIN = "the unit's firmware has no roller spin; flash a newer image"
 # A rollback that forgives every catch past snag_free (free_tip on a rollback).
 NO_FREE_ROLLBACK = "the unit's firmware ignores FREE on a rollback; flash v0.12.0"
 WAIT_FACTOR = 1.5  # the timeout of a waited move is this factor times the expected time …
@@ -584,7 +593,7 @@ class FeedMotion(FeedBase):
         the final kind "at_rest"). It is empty by default (None counts as empty), and the start is
         then sent as before. Otherwise the host first sends the stop, armed for this start only,
         and then the start. "held" is taken only on "rollback" and "unload", and "at_rest" on every
-        mode but "assist_both".
+        mode but "assist_both" and "spin".
 
         ``held_ms`` is the held window of this move only, in whole ms within held_ms_min and
         held_ms_max. It needs "held" in ``stop_when``. None sends 0, and the unit uses its own
@@ -596,8 +605,8 @@ class FeedMotion(FeedBase):
         mode or stop, for a stop that the mode does not take, and for a held_ms that is not a whole
         number in its bounds, comes without "held" or fails the friction floor. Nothing is sent
         then. Raises RuntimeError when the firmware has no feed, has not reported
-        yet, has no follow (for "assist_both"), cannot stop on the plunger (has_stop_when is False),
-        or did not answer."""
+        yet, has no follow (for "assist_both"), has no roller spin (for "spin"), cannot stop on the
+        plunger (has_stop_when is False), or did not answer."""
         return self._start_move(
             "a host module",
             lane_index,
@@ -662,8 +671,9 @@ class FeedMotion(FeedBase):
             raise ValueError(
                 f"ace2k: stop_when held on {mode}: held is taken only on rollback and unload"
             )
-        if "at_rest" in kinds and mode == "assist_both":
-            raise ValueError(f"ace2k: stop_when at_rest on {mode}: {AT_REST_REFUSED}")
+        if "at_rest" in kinds and mode in AT_REST_REFUSED_BY_MODE:
+            reason = AT_REST_REFUSED_BY_MODE[mode]
+            raise ValueError(f"ace2k: stop_when at_rest on {mode}: {reason}")
         return kinds
 
     def _held_window(self, kinds: frozenset[str], held_ms: int | None, speed_mm_s: float) -> int:
@@ -969,6 +979,8 @@ class FeedMotion(FeedBase):
         mode = start.mode
         if mode == "assist_both" and not self.has_follow:
             raise RuntimeError(f"ace2k: {NO_FOLLOW}")
+        if mode == "spin" and not self.has_spin:
+            raise RuntimeError(f"ace2k: {NO_SPIN}")
         if mode == "assist_both" and not self.unit.units.may_follow(self.unit, index):
             # The lane belongs to a shared extruder, on any unit, and is not its active lane.
             # Only one lane per extruder can be in the follow. ACEK_LANE_ACTIVE chooses it.

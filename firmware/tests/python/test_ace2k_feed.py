@@ -2126,6 +2126,77 @@ def test_start_move_assist_both_returns_a_move_and_following_is_busy() -> None:
     assert move.done() and move.result()["mode"] == "following"
 
 
+# --- reverse roller spin (ACE2K_FEED_CMD_SPIN) ----------------------------------------------------
+
+WITH_SPIN = dict(DEFAULT_CONSTANTS, ACE2K_FEED_SPIN_MAX_UM=200000)
+
+
+def make_spin(
+    responses: Responses | None = None,
+    constants: dict[str, float] | None = None,
+    **kwargs: object,
+) -> tuple[Ace2kFeed, FakePrinter, FakeMcu, Responses]:
+    """A connected feed on an image that carries reverse roller spin."""
+    responses = dict(RESPONSES) if responses is None else responses
+    module, printer, mcu = make_feed(
+        responses, constants=WITH_SPIN if constants is None else constants, **kwargs
+    )
+    mcu.config_callback()
+    return feed_of(module), printer, mcu, responses
+
+
+def test_the_spin_mode_and_refusal_names() -> None:
+    assert ace2k_feed.CMD_MODES["spin"] == 7
+    assert ace2k_feed.MODE_NAMES[9] == "spinning"
+    assert ace2k_feed.REFUSAL_NAMES[10] == "filament_present"
+
+
+def test_has_spin_comes_from_the_dictionary() -> None:
+    spin_feed, _, _, _ = make_spin()
+    old_feed, _, _, _ = make_spin(constants=DEFAULT_CONSTANTS)
+    assert spin_feed.has_spin is True
+    assert old_feed.has_spin is False
+
+
+def test_start_move_spin_sends_mode_seven_and_tracks_spinning() -> None:
+    feed, _, mcu, responses = make_spin()
+    responses["ace2k_feed_start"] = {"lane": 0, "accepted": 1, "reason": 0}
+    move = feed.start_move(0, "spin", 40.0, 15.0)
+    assert isinstance(move, ace2k_feed.Move) and move.mode == "spin"
+    assert mcu.queries[-1][1] == [0, 7, 40000, 15000, 1, 0]
+    assert not feed.any_busy()
+    mcu.subscriptions["ace2k_feed_state"](
+        state_frame([9, 0, 0, 0], [0] * 4, [15000, 0, 0, 0], [40, 0, 0, 0], [0] * 4, (1, 0, 0, 0))
+    )
+    assert feed.lane_status(0)["mode"] == "spinning"
+    assert feed.any_busy()
+    mcu.subscriptions["ace2k_feed_event"](event_params(0, 0, 9, 40000, 0, seq=move.seq))
+    assert move.done() and move.result()["mode"] == "spinning"
+
+
+def test_start_move_spin_refuses_old_image_and_filament_present() -> None:
+    old_feed, _, old_mcu, _ = make_spin(constants=DEFAULT_CONSTANTS)
+    with pytest.raises(RuntimeError, match=re.escape(ace2k_feed.NO_SPIN)):
+        old_feed.start_move(0, "spin", 40.0, 15.0)
+    assert old_mcu.queries == []
+
+    feed, _, mcu, responses = make_spin()
+    responses["ace2k_feed_start"] = {"lane": 0, "accepted": 0, "reason": 10}
+    with pytest.raises(ace2k_feed.FeedRefused, match="filament_present"):
+        feed.start_move(0, "spin", 40.0, 15.0)
+    assert mcu.queries[-1][1] == [0, 7, 40000, 15000, 1, 0]
+
+
+def test_start_move_spin_refuses_at_rest_and_held_stop_when() -> None:
+    feed, _, mcu, _ = make_spin(constants=dict(WITH_HELD, ACE2K_FEED_SPIN_MAX_UM=200000))
+    commands = list(mcu.commands)
+    with pytest.raises(ValueError, match="roller spin runs without inserted filament"):
+        feed.start_move(0, "spin", 40.0, 15.0, stop_when=("at_rest",))
+    with pytest.raises(ValueError, match="held is taken only on rollback and unload"):
+        feed.start_move(0, "spin", 40.0, 15.0, stop_when=("held",))
+    assert mcu.queries == [] and mcu.commands == commands
+
+
 # --- a speed on a following lane: refused, by the unit or by the host (API_VERSION 19) -----------
 
 FOLLOWING_SPEED = (

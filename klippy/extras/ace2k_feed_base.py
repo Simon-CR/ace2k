@@ -65,6 +65,7 @@ class FeedBase:
     # What the firmware image can do. These stay False until the connect step finds them.
     present: bool
     has_follow: bool
+    has_spin: bool
     has_free_rollback: bool
     has_following_refusal: bool
     has_stop_when: bool
