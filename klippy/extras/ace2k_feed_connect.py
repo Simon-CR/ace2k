@@ -188,6 +188,8 @@ NO_CLEAR_KEY = f"{NO_CLEAR}; flash v0.13.0"
 FREE_ROLLBACK_CONSTANT = "ACE2K_FEED_FREE_ROLLBACK"
 # An image that refuses a speed on a following lane, with the reason "following".
 FOLLOWING_REFUSAL_CONSTANT = "ACE2K_FEED_REFUSED_FOLLOWING"
+# Roller spin: the spin length bound, only present on firmware with ACE2K_FEED_CMD_SPIN.
+SPIN_MAX_CONSTANT = "ACE2K_FEED_SPIN_MAX_UM"
 FEED_REPORT_HZ = 1.0
 # The unit keeps its periodic reports on different ticks only for periods on this grid
 # (see "Reports" in docs/protocol.md). So the rate that was asked for is snapped to the grid.
@@ -274,6 +276,7 @@ class FeedConnect(FeedBase):
         # the dictionary, so they are checked at connect.
         self.follow_keys = FOLLOW.from_config(config)
         self.has_follow = False  # True when the image has the follow constants (set at connect)
+        self.has_spin = False  # True when the image has roller spin (set at connect)
         # The values in effect: the keys, over the firmware defaults.
         self.follow: dict[str, float] = {}
         self.follow_group = FOLLOW  # at connect, a copy with the limits from the dictionary
@@ -435,6 +438,7 @@ class FeedConnect(FeedBase):
         self._build_unload()
         self.has_free_rollback = self._has_constant(FREE_ROLLBACK_CONSTANT)
         self.has_following_refusal = self._has_constant(FOLLOWING_REFUSAL_CONSTANT)
+        self.has_spin = self._has_constant(SPIN_MAX_CONSTANT)
         ticks = self.mcu.seconds_to_clock(self.report_period_ms / 1000.0)
         self.mcu.add_config_cmd(f"ace2k_feed_query rest_ticks={ticks}", is_init=True)
         self._subscribe(self._handle_state, STATE_FMT)
